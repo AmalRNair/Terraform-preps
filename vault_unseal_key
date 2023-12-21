@@ -1,0 +1,57 @@
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"
+  }
+}
+
+resource "helm_release" "vault" {
+  name       = "vault"
+  repository = "https://helm.releases.hashicorp.com"
+  chart      = "vault"
+
+  set {
+    name  = "server.ha.enabled"
+    value = "true"
+  }
+  set {
+    name  = "server.ha.raft.enabled"
+    value = "true"
+  }
+  set {
+    name  = "server.ha.raft.setNodeId"
+    value = "true"
+  }
+  set {
+    name  = "server.ha.raft.config"
+    value = <<EOT
+ui = false
+
+listener "tcp" {
+  tls_disable = 1
+  address = "[::]:8200"
+  cluster_address = "[::]:8201"
+}
+
+storage "raft" {
+  path    = "/vault/data"
+}
+
+
+EOT
+  }
+}
+
+resource "null_resource" "init_vault" {
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl exec vault-0 -- vault operator init \
+        -key-shares=1 \
+        -key-threshold=1 \
+        -format=json > cluster-keys.json
+
+        VAULT_UNSEAL_KEY=$(jq -r '.unseal_keys_b64[]' cluster-keys.json)
+        echo "vault_unseal_key = \"$VAULT_UNSEAL_KEY\"" > vault_unseal_key.tf
+    EOT
+  }
+}
+
